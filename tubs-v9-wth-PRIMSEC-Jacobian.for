@@ -2,8 +2,9 @@ C==================================================================
 C  UMAT with real PRCREEP / SECREEP / TECREEP / VPFLOW
 C  - IMPLICIT NONE everywhere
 C  - supports NTENS = 3,4,6 (uses only first NTENS components)
-C  - all material constants are PARAMETER inside subroutines
+c  - all material constants are PARAMETER inside subroutines
 C  - safety tiny to avoid div/0
+C - check connection of STRESS and STATEV for primary creep strains (STATEV(K+6) used by original)
 C==================================================================
 
       SUBROUTINE UMAT(STRESS,STATEV,DDSDDE,SSE,SPD,SCD,
@@ -46,7 +47,7 @@ C --- material constants (internal parametrization)
       LSTR = 1   ! 1 = stresses
 
 C     ???????? ??????? ??????????:
-C     PS(1), PS(2), PS(3) — ?????? ??????? ???????? ??????????
+C     PS(1), PS(2), PS(3) ï¿½ ?????? ??????? ???????? ??????????
 C --- elastic moduli
       EBULK3 = E / (1.0D0 - 2.0D0*NU)
       EG2 = E / (1.0D0 + NU)
@@ -520,7 +521,7 @@ C==================================================================
 C----- compute compressive strength SIGMAC (eq. like in user's code)
       SIGMAC = Ncoef * TEPSVOL + SIGC0
 
-C----- maximum principal (approx) — use normal components
+C----- maximum principal (approx) ï¿½ use normal components
       SIGP_MAX = PS(1)
       IF (PS(2) .GT. SIGP_MAX) SIGP_MAX = PS(2)
       IF (PS(3) .GT. SIGP_MAX) SIGP_MAX = PS(3)
