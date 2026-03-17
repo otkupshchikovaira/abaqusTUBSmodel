@@ -1,10 +1,4 @@
-C==================================================================
-C  UMAT with real PRCREEP / SECREEP / TECREEP / VPFLOW
-C  - IMPLICIT NONE everywhere
-C  - supports NTENS = 3,4,6 (uses only first NTENS components)
-C  - all material constants are PARAMETER inside subroutines
-C  - safety tiny to avoid div/0
-C==================================================================
+
 
       SUBROUTINE UMAT(STRESS,STATEV,DDSDDE,SSE,SPD,SCD,
      1 RPL,DDSDDT,DRPLDE,DRPLDT,
