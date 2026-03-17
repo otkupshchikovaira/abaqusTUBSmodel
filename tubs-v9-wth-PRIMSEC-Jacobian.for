@@ -1,4 +1,4 @@
-
+C=====================================================================fgt
 
       SUBROUTINE UMAT(STRESS,STATEV,DDSDDE,SSE,SPD,SCD,
      1 RPL,DDSDDT,DRPLDE,DRPLDT,
