@@ -100,7 +100,7 @@ C --- form elastic stiffness (only relevant components set)
       END DO
       CALL COMPUTE_EFFECTIVE_EPS_USER(PRIMSTRAN, NTENS, EFFPRIMEPS)
 C --- compute effective stress and pressure (safe for NTENS < 6)
-      CALL COMPUTE_EFFECTIVE_USER(STRESS1, NTENS, EFFSIGMA, PRESS)
+      CALL COMPUTE_EFFECTIVE_USER(STRESS, NTENS, EFFSIGMA, PRESS)
 C --- get primary strain from STATEV if available (STATEV(K+6) used by original)
 
 
@@ -129,10 +129,10 @@ C --- call creep / viscoplastic subroutines (they fill 6-component rate arrays)
 C=====================================================================
 C     MULTIPLICATIOM for DDSDDE
 C=====================================================================
-      CALL DDSDDEDERIVATIVES(DDQ, DQ, STRESS1, DENOM, NTENS)
-      CALL PRIMARYFUNCTIONS(DOUTER,STRESS1,NTENS,EFFSIGMA,
+      CALL DDSDDEDERIVATIVES(DDQ, DQ, STRESS, DENOM, NTENS)
+      CALL PRIMARYFUNCTIONS(DOUTER,STRESS,NTENS,EFFSIGMA,
      1 EFFPRIMEPS,DENOM,FP,DFP)
-      CALL SECONDARYFUNCTIONS(DOUTER,STRESS1,NTENS,EFFSIGMA,
+      CALL SECONDARYFUNCTIONS(DOUTER,STRESS,NTENS,EFFSIGMA,
      1 DENOM,FS,DFS)    
 C      CE*DFP/CE*DFS
       CALL MAT6x6_VEC6(DDS, DFP, DSFP)
@@ -161,7 +161,7 @@ C      CE*DFP/CE*DFS
         WRITE(*,*) 'ERROR solving linear system'
       END IF
       DDSDDE = RHS
-      CALL MAT6x6_VEC6(DDSDDE, DSTRAN, DSTRESS1)      
+C      CALL MAT6x6_VEC6(DDSDDE, DSTRAN, DSTRESS)      
 C=====================================================================
 C     UPDATE STRAINS AND STRESSES
 C=====================================================================
@@ -178,11 +178,11 @@ C         PRIMCREEPRATE(K)=0.0
 
 C --- compute stress increment DSTRESS = DDS * DELSTRAN
       CALL KMLT1_USER(DDS, DELSTRAN, DSTRESS, NTENS)
-
+C      DSTRESS=DSTRESS1
 CC --- update stress
       DO K = 1, NTENS
-         STRESS(K) = STRESS1(K) + DSTRESS1(K)
-         STRESS1(K) = STRESS1(K) + DSTRESS1(K)
+         STRESS(K) = STRESS(K) + DSTRESS(K)
+C         STRESS1(K) = STRESS1(K) + DSTRESS1(K)
       END DO
 CC --- return elastic DDS as DDSDDE (consistent tangent approximate)
       DO I = 1, NTENS
@@ -201,9 +201,9 @@ C --- update STATEV primary creep strains (store PRIMSTRAN incrementally as in o
       DO K=1,3
           STATEV(K)=PS(K)
       END DO
-      STATEV(6+2*NTENS+1)=DSTRESS(1)/DSTRESS1(1)
-      STATEV(6+2*NTENS+2)=DSTRESS(2)/DSTRESS1(2)
-      STATEV(6+2*NTENS+3)=DSTRESS(3)/DSTRESS1(3)
+C      STATEV(6+2*NTENS+1)=DSTRESS(1)/DSTRESS1(1)
+C      STATEV(6+2*NTENS+2)=DSTRESS(2)/DSTRESS1(2)
+C      STATEV(6+2*NTENS+3)=DSTRESS(3)/DSTRESS1(3)
       RETURN
       END
 
