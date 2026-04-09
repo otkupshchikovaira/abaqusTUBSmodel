@@ -25,18 +25,19 @@ C --- standard UMAT arguments (explicit types)
       REAL*8 DROT(3,3), PNEWDT, CELENT, DFGRD0(3,3), DFGRD1(3,3)
 
 C --- locals
-      INTEGER I,J,K,LSTR
-      REAL*8 DDS(6,6), DELSTRAN(6), DSTRESS(6),TERTSTRAN(6)
-      REAL*8 PRIMSTRAN(6), PRIMCREEPRATE(6), SECCREEPRATE(6)
+      INTEGER I,J,K,LSTR,info,ipiv(6)
+      REAL*8 DDS(6,6), DELSTRAN(6), DSTRESS(6),TERTSTRAN(6),DSTRESS1(6)
+      REAL*8 PRIMSTRAN(6), PRIMCREEPRATE(6), SECCREEPRATE(6),STRESS1(6)
       REAL*8 TERTCREEPRATE(6), VISCOPLASTICRATE(6), DQP(6), DQF(6)
-      REAL*8 DDQ(6),DQ(6),DFP(6),DSFP(6),DSFS(6),M1P(6,6),M1S(6,6)
-      REAL*8 M2P(6,6),M2S(6,6), AP(6,6), AS(6,6),KSUM(6,6)
+      REAL*8 DDQ(6,6),DQ(6),DFP(6),DFS(6),DSFP(6),DSFS(6),M1P(6,6),M1S(6,6)
+      REAL*8 M2P(6,6),M2S(6,6), AP(6,6), AS(6,6),KSUM(6,6),RHS(6,6)
       REAL*8 EFFSIGMA, EFFPRIMEPS, PRESS, TEPSVOL,DENOM1,F_active
-      REAL*8 E, NU, EBULK3, EG2, EG, ELAM,DENOM,FP,FS,FS1,DOUTER
-      REAL*8 tiny
+      REAL*8 E, NU, NP, NS, EBULK3, EG2, EG, ELAM,DENOM,FP,FS,FS1,
+     1 DOUTER,M(6,6),tiny
       REAL*8 S(6), PS(3)
       REAL*8 alphaP, alphaS, alphaEff
       PARAMETER (E = 30.0D9, NU = 0.3D0)
+      PARAMETER (NP = 550.0D6, NS = 110.0D6)
       PARAMETER (tiny = 1.0D-20)
       external dgetrf, dgetrs
 C --- material constants (internal parametrization)
@@ -87,10 +88,6 @@ C --- zero local arrays (6-size storage)
 
 C --- form elastic stiffness (only relevant components set)
       CALL FORM_ELASTIC_DDS_USER(DDS, NTENS, EG2, ELAM, EG)
-
-C --- compute effective stress and pressure (safe for NTENS < 6)
-      CALL COMPUTE_EFFECTIVE_USER(STRESS, NTENS, EFFSIGMA, PRESS)
-C --- get primary strain from STATEV if available (STATEV(K+6) used by original)
       DO K = 1, NTENS
          IF ( (K+6) .LE. NSTATV ) THEN
             PRIMSTRAN(K) = STATEV(K+6)
@@ -102,6 +99,10 @@ C --- get primary strain from STATEV if available (STATEV(K+6) used by original)
          END IF
       END DO
       CALL COMPUTE_EFFECTIVE_EPS_USER(PRIMSTRAN, NTENS, EFFPRIMEPS)
+C --- compute effective stress and pressure (safe for NTENS < 6)
+      CALL COMPUTE_EFFECTIVE_USER(STRESS1, NTENS, EFFSIGMA, PRESS)
+C --- get primary strain from STATEV if available (STATEV(K+6) used by original)
+
 
 C --- volumetric strain
 C      IF (NTENS .GE. 3) THEN
@@ -142,11 +143,11 @@ C      CE*DFP/CE*DFS
       CALL DGEMM('N','N',6,6,6,FS, DDS,6, DDQ,6, 0.0D0, M2S,6)
       DO I = 1, 6
        DO J = 1, 6
-          AP(I,J) = 1/NP*(M1P(I,J) + M1P(I,J))
-          AS(I,J) = 1/NS*(M1S(I,J) + M1S(I,J))
+          AP(I,J) = 1.0D0/NP*(M1P(I,J) + M2P(I,J))
+          AS(I,J) = 1.0D0/NS*(M1S(I,J) + M2S(I,J))
           KSUM(I,J) = DTIME*(AP(I,J)+AS(I,J))
        END DO
-       KSUM(I,I)=M(I,I)+1.0D0
+       KSUM(I,I)=KSUM(I,I)+1.0D0
       END DO
       CALL dgetrf(6, 6, KSUM, 6, ipiv, info)
 
@@ -180,13 +181,13 @@ C --- compute stress increment DSTRESS = DDS * DELSTRAN
 
 CC --- update stress
       DO K = 1, NTENS
-         STRESS(K) = STRESS(K) + DSTRESS(K)
+         STRESS(K) = STRESS1(K) + DSTRESS1(K)
          STRESS1(K) = STRESS1(K) + DSTRESS1(K)
       END DO
 CC --- return elastic DDS as DDSDDE (consistent tangent approximate)
       DO I = 1, NTENS
          DO J = 1, NTENS
-            DDSDDE(I,J) = DDS(I,J)
+            DDSDDE(I,J) = DDSDDE(I,J)
          END DO
       END DO
 C --- update STATEV primary creep strains (store PRIMSTRAN incrementally as in original)
@@ -381,7 +382,7 @@ C==================================================================
       REAL*8 SECCREEPRATE(6), DQP(6), STRESS(*)
       REAL*8 p0, NEXP, NS, arg, DENOM, s1,s2,s3,s4,s5,s6, tiny,FS
 
-      PARAMETER (p0 = 1.0D6, NEXP = 1.0D0, NS = 5.0D11, tiny = 1.0D-20)
+      PARAMETER (p0 = 1.0D6, NEXP = 1.0D0, NS = 110.D6, tiny = 1.0D-20)
       FS = p0*(EFFSIGMA/p0)**NEXP
 
       s1 = STRESS(1)
@@ -597,7 +598,7 @@ C==================================================================
 C==================================================================
 C  DERIVATIVES FOR JACOBIAN
 C==================================================================
-      SUBROUTINE DDSDDEDERIVATIVES(DDQP, DQP, STRESS, NTENS)
+      SUBROUTINE DDSDDEDERIVATIVES(DDQP, DQP, STRESS,DENOM, NTENS)
       IMPLICIT NONE
       INTEGER NTENS, K
       REAL*8 DOUTER,DENOM3
@@ -630,63 +631,63 @@ C==================================================================
       DENOM = SQRT(MAX(arg, tiny))
       DENOM3 = (SQRT(MAX(arg, tiny)))**3
 
-      DQ(1) = 0.5D0*(2.0D0*s1 - s2 - s3) / DENOM
-      DQ(2) = 0.5D0*(-s1 + 2.0D0*s2 - s3) / DENOM
-      DQ(3) = 0.5D0*(-s2 + 2.0D0*s3 - s1) / DENOM
-      DQ(4) = 3.0D0 * s4 / DENOM
-      DQ(5) = 3.0D0 * s5 / DENOM
-      DQ(6) = 3.0D0 * s6 / DENOM  
+      DQP(1) = 0.5D0*(2.0D0*s1 - s2 - s3) / DENOM
+      DQP(2) = 0.5D0*(-s1 + 2.0D0*s2 - s3) / DENOM
+      DQP(3) = 0.5D0*(-s2 + 2.0D0*s3 - s1) / DENOM
+      DQP(4) = 3.0D0 * s4 / DENOM
+      DQP(5) = 3.0D0 * s5 / DENOM
+      DQP(6) = 3.0D0 * s6 / DENOM  
       
-      DDQ(1,1) = - (2D0*s1 - s2 - s3)**2 / (4D0*DENOM3)+  
+      DDQP(1,1) = - (2D0*s1 - s2 - s3)**2 / (4D0*DENOM3)+  
      1  1D0 / DENOM
-      DDQ(1,2) = - (2D0*s1 - s2 - s3)*( -s1 + 2D0*s2 - s3 ) / 
+      DDQP(1,2) = - (2D0*s1 - s2 - s3)*( -s1 + 2D0*s2 - s3 ) / 
      1 (4D0*DENOM3)- 1D0/(2D0*DENOM)
-      DDQ(1,3) = - (2D0*s1 - s2 - s3)*( -s2 + 2D0*s3 - s1 ) /
+      DDQP(1,3) = - (2D0*s1 - s2 - s3)*( -s2 + 2D0*s3 - s1 ) /
      1 (4D0*DENOM3)- 1D0/(2D0*DENOM)
-      DDQ(1,4) = - 3D0*(2D0*s1 - s2 - s3)*s4 / (2D0*DENOM3)
-      DDQ(1,5) = - 3D0*(2D0*s1 - s2 - s3)*s5 / (2D0*DENOM3)
-      DDQ(1,6) = - 3D0*(2D0*s1 - s2 - s3)*s6 / (2D0*DENOM3)
+      DDQP(1,4) = - 3D0*(2D0*s1 - s2 - s3)*s4 / (2D0*DENOM3)
+      DDQP(1,5) = - 3D0*(2D0*s1 - s2 - s3)*s5 / (2D0*DENOM3)
+      DDQP(1,6) = - 3D0*(2D0*s1 - s2 - s3)*s6 / (2D0*DENOM3)
       
-      DDQ(2,1) = - (2D0*s1 - s2 - s3)*( -s1 + 2D0*s2 - s3 ) /
+      DDQP(2,1) = - (2D0*s1 - s2 - s3)*( -s1 + 2D0*s2 - s3 ) /
      1 (4D0*DENOM3) - 1D0/(2D0*DENOM)
-      DDQ(2,2) = - ( -s1 + 2D0*s2 - s3 )**2 / (4D0*DENOM3)+
+      DDQP(2,2) = - ( -s1 + 2D0*s2 - s3 )**2 / (4D0*DENOM3)+
      1 1D0 / DENOM
-      DDQ(2,3) = - ( -s1 + 2D0*s2 - s3 )*( -s2 + 2D0*s3 - s1 ) / 
+      DDQP(2,3) = - ( -s1 + 2D0*s2 - s3 )*( -s2 + 2D0*s3 - s1 ) / 
      1 (4D0*DENOM3)- 1D0/(2D0*DENOM)
-      DDQ(2,4) = - 3D0*( -s1 + 2D0*s2 - s3 )*s4 / (2D0*DENOM3)
-      DDQ(2,5) = - 3D0*( -s1 + 2D0*s2 - s3 )*s5 / (2D0*DENOM3)
-      DDQ(2,6) = - 3D0*( -s1 + 2D0*s2 - s3 )*s6 / (2D0*DENOM3)
+      DDQP(2,4) = - 3D0*( -s1 + 2D0*s2 - s3 )*s4 / (2D0*DENOM3)
+      DDQP(2,5) = - 3D0*( -s1 + 2D0*s2 - s3 )*s5 / (2D0*DENOM3)
+      DDQP(2,6) = - 3D0*( -s1 + 2D0*s2 - s3 )*s6 / (2D0*DENOM3)
       
-      DDQ(3,1) = - (2D0*s1 - s2 - s3)*( -s2 + 2D0*s3 - s1 ) / 
+      DDQP(3,1) = - (2D0*s1 - s2 - s3)*( -s2 + 2D0*s3 - s1 ) / 
      1 (4D0*DENOM3) - 1D0/(2D0*DENOM)
-      DDQ(3,2) = - ( -s1 + 2D0*s2 - s3 )*( -s2 + 2D0*s3 - s1 ) /
+      DDQP(3,2) = - ( -s1 + 2D0*s2 - s3 )*( -s2 + 2D0*s3 - s1 ) /
      1 (4D0*DENOM3) - 1D0/(2D0*DENOM)
-      DDQ(3,3) = - ( -s2 + 2D0*s3 - s1 )**2 / (4D0*DENOM3)+
+      DDQP(3,3) = - ( -s2 + 2D0*s3 - s1 )**2 / (4D0*DENOM3)+
      1 1D0 / DENOM
-      DDQ(3,4) = - 3D0*( -s2 + 2D0*s3 - s1 )*s4 / (2D0*DENOM3)
-      DDQ(3,5) = - 3D0*( -s2 + 2D0*s3 - s1 )*s5 / (2D0*DENOM3)
-      DDQ(3,6) = - 3D0*( -s2 + 2D0*s3 - s1 )*s6 / (2D0*DENOM3)
+      DDQP(3,4) = - 3D0*( -s2 + 2D0*s3 - s1 )*s4 / (2D0*DENOM3)
+      DDQP(3,5) = - 3D0*( -s2 + 2D0*s3 - s1 )*s5 / (2D0*DENOM3)
+      DDQP(3,6) = - 3D0*( -s2 + 2D0*s3 - s1 )*s6 / (2D0*DENOM3)
 
-      DDQ(4,1) = -3D0*(2D0*s1 - s2 - s3)*s4 / (2D0*DENOM3)
-      DDQ(4,2) = -3D0*( -s1 + 2D0*s2 - s3 )*s4 / (2D0*DENOM3)
-      DDQ(4,3) = -3D0*( -s2 + 2D0*s3 - s1 )*s4 / (2D0*DENOM3)
-      DDQ(4,4) = - 9D0*s4*s4 / (DENOM3)+ 3D0/DENOM
-      DDQ(4,5) = - 9D0*s4*s5 / (DENOM3)
-      DDQ(4,6) = - 9D0*s4*s6 / (DENOM3)
+      DDQP(4,1) = -3D0*(2D0*s1 - s2 - s3)*s4 / (2D0*DENOM3)
+      DDQP(4,2) = -3D0*( -s1 + 2D0*s2 - s3 )*s4 / (2D0*DENOM3)
+      DDQP(4,3) = -3D0*( -s2 + 2D0*s3 - s1 )*s4 / (2D0*DENOM3)
+      DDQP(4,4) = - 9D0*s4*s4 / (DENOM3)+ 3D0/DENOM
+      DDQP(4,5) = - 9D0*s4*s5 / (DENOM3)
+      DDQP(4,6) = - 9D0*s4*s6 / (DENOM3)
       
-      DDQ(5,1) = -3D0*(2D0*s1 - s2 - s3)*s5 / (2D0*DENOM3)
-      DDQ(5,2) = -3D0*( -s1 + 2D0*s2 - s3 )*s5 / (2D0*DENOM3)
-      DDQ(5,3) = -3D0*( -s2 + 2D0*s3 - s1 )*s5 / (2D0*DENOM3)
-      DDQ(5,4) = - 9D0*s4*s5 / (DENOM3)
-      DDQ(5,5) = - 9D0*s5*s5 / (DENOM3)+ 3D0/DENOM
-      DDQ(5,6) = - 9D0*s5*s6 / (DENOM3)
+      DDQP(5,1) = -3D0*(2D0*s1 - s2 - s3)*s5 / (2D0*DENOM3)
+      DDQP(5,2) = -3D0*( -s1 + 2D0*s2 - s3 )*s5 / (2D0*DENOM3)
+      DDQP(5,3) = -3D0*( -s2 + 2D0*s3 - s1 )*s5 / (2D0*DENOM3)
+      DDQP(5,4) = - 9D0*s4*s5 / (DENOM3)
+      DDQP(5,5) = - 9D0*s5*s5 / (DENOM3)+ 3D0/DENOM
+      DDQP(5,6) = - 9D0*s5*s6 / (DENOM3)
       
-      DDQ(6,1) = -3D0*(2D0*s1 - s2 - s3)*s6 / (2D0*DENOM3)
-      DDQ(6,2) = -3D0*( -s1 + 2D0*s2 - s3 )*s6 / (2D0*DENOM3)
-      DDQ(6,3) = -3D0*( -s2 + 2D0*s3 - s1 )*s6 / (2D0*DENOM3)
-      DDQ(6,4) = - 9D0*s4*s6 / (DENOM3)
-      DDQ(6,5) = - 9D0*s5*s6 / (DENOM3)
-      DDQ(6,6) = - 9D0*s6*s6 / (DENOM3)+ 3D0/DENOM
+      DDQP(6,1) = -3D0*(2D0*s1 - s2 - s3)*s6 / (2D0*DENOM3)
+      DDQP(6,2) = -3D0*( -s1 + 2D0*s2 - s3 )*s6 / (2D0*DENOM3)
+      DDQP(6,3) = -3D0*( -s2 + 2D0*s3 - s1 )*s6 / (2D0*DENOM3)
+      DDQP(6,4) = - 9D0*s4*s6 / (DENOM3)
+      DDQP(6,5) = - 9D0*s5*s6 / (DENOM3)
+      DDQP(6,6) = - 9D0*s6*s6 / (DENOM3)+ 3D0/DENOM
       RETURN
       END
     
@@ -697,15 +698,14 @@ C==================================================================
      1 EFFPRIMEPS,DENOM,FP,DFP)
       IMPLICIT NONE
       INTEGER NTENS, K
-      REAL*8 EFFSIGMA, EFFPRIMEPS, DTIME, tiny
-      REAL*8 STRESS(*),DFP(6)
-      REAL*8 Ep, MEXP, NP, FP, arg, DENOM, s1,s2,s3,s4,s5,s6
+      REAL*8 DOUTER
+      REAL*8 EFFSIGMA, EFFPRIMEPS, tiny
+      REAL*8 STRESS(*), DFP(6)
+      REAL*8 Ep, MEXP, FP, arg, DENOM, s1,s2,s3,s4,s5,s6
 
       PARAMETER (tiny = 1.0D-20)
+      PARAMETER (Ep = 110.0D6, MEXP = 2.0D0)
 
-      FP = Ep * ( (EFFSIGMA / Ep)**MEXP - EFFPRIMEPS )
-      IF (FP .LT. 0.0D0) FP = 0.0D0
-      
       s1 = STRESS(1)
       s2 = STRESS(2)
       s3 = STRESS(3)
@@ -723,14 +723,27 @@ C==================================================================
          s6 = STRESS(6)
       ELSE
          s6 = 0.0D0
-      END IF      
-      DOUTER = Ep*MEXP*((EFFSIGMA)**(MEXP-1))/ ((Ep)**MEXP)
-      DFP(1) = DOUTER* 0.5D0*(2.0D0*s1 - s2 - s3) / DENOM
-      DFP(2) = DOUTER* 0.5D0*(-s1 + 2.0D0*s2 - s3) / DENOM
-      DFP(3) = DOUTER* 0.5D0*(-s2 + 2.0D0*s3 - s1) / DENOM
-      DFP(4) = DOUTER* 3.0D0 * s4 / DENOM
-      DFP(5) = DOUTER* 3.0D0 * s5 / DENOM
-      DFP(6) = DOUTER* 3.0D0 * s6 / DENOM  
+      END IF
+      arg = 0.5D0 * ( (s1 - s2)**2 + (s2 - s3)**2 + (s1 - s3)**2) +
+     1 3.0D0*(s4**2 + s5**2 + s6**2)
+      DENOM = SQRT(MAX(arg, tiny))
+
+      FP = Ep * ( (EFFSIGMA / Ep)**MEXP - EFFPRIMEPS )
+      IF (FP .LE. 0.0D0) THEN
+         FP = 0.0D0
+         DOUTER = 0.0D0
+         DO K = 1, 6
+            DFP(K) = 0.0D0
+         END DO
+      ELSE
+         DOUTER = Ep*MEXP*(EFFSIGMA**(MEXP-1)) / (Ep**MEXP)
+         DFP(1) = DOUTER * 0.5D0*(2.0D0*s1 - s2 - s3) / DENOM
+         DFP(2) = DOUTER * 0.5D0*(-s1 + 2.0D0*s2 - s3) / DENOM
+         DFP(3) = DOUTER * 0.5D0*(-s2 + 2.0D0*s3 - s1) / DENOM
+         DFP(4) = DOUTER * 3.0D0 * s4 / DENOM
+         DFP(5) = DOUTER * 3.0D0 * s5 / DENOM
+         DFP(6) = DOUTER * 3.0D0 * s6 / DENOM
+      END IF
       RETURN
       END
 C==================================================================
@@ -740,11 +753,12 @@ C==================================================================
      1 DENOM,FS,DFS)
       IMPLICIT NONE
       INTEGER NTENS, K
-      REAL*8 EFFSIGMA, EFFPRIMEPS, DTIME, tiny
-      REAL*8 STRESS(*),DFS(6)
-      REAL*8 p0, NEXP, NS, arg, DENOM, s1,s2,s3,s4,s5,s6, tiny,FS
+      REAL*8 DOUTER
+      REAL*8 EFFSIGMA, tiny
+      REAL*8 STRESS(*), DFS(6)
+      REAL*8 p0, NEXP, arg, DENOM, s1,s2,s3,s4,s5,s6, FS
 
-      PARAMETER (p0 = 1.0D6, NEXP = 1.0D0, NS = 5.0D11, tiny = 1.0D-20)
+      PARAMETER (p0 = 1.0D6, NEXP = 1.0D0, tiny = 1.0D-20)
       
       FS = p0*(EFFSIGMA/p0)**NEXP
       
@@ -766,12 +780,34 @@ C==================================================================
       ELSE
          s6 = 0.0D0
       END IF
-      DOUTER = p0*NEXP*((EFFSIGMA)**(NEXP-1))/ ((P0)**NEXP)
+      DOUTER = p0*NEXP*((EFFSIGMA)**(NEXP-1))/ ((p0)**NEXP)
       DFS(1) = DOUTER* 0.5D0*(2.0D0*s1 - s2 - s3) / DENOM
       DFS(2) = DOUTER* 0.5D0*(-s1 + 2.0D0*s2 - s3) / DENOM
       DFS(3) = DOUTER* 0.5D0*(-s2 + 2.0D0*s3 - s1) / DENOM
       DFS(4) = DOUTER* 3.0D0 * s4 / DENOM
       DFS(5) = DOUTER* 3.0D0 * s5 / DENOM
       DFS(6) = DOUTER* 3.0D0 * s6 / DENOM  
+      RETURN
+      END
+
+C==================================================================
+C  USDFLD — required if *USER DEFINED FIELD appears in the .inp file.
+C  Stub: leaves FIELD unchanged (assumes initial values from input are OK).
+C  Replace body if field variables must depend on time, coords, STATEV, etc.
+C==================================================================
+      SUBROUTINE USDFLD(FIELD,STATEV,PNEWDT,DIRECT,T,CELENT,TIME,
+     1 DTIME,CMNAME,ORNAME,NFIELD,NSTATV,NOEL,NPT,LAYER,
+     2 KSPT,KSTEP,KINC,NDI,NSHR,COORD,JMAC,JMATYP,MATLAYO,
+     3 LACCFLG)
+      IMPLICIT NONE
+      INTEGER LACCFLG
+      INTEGER NFIELD,NSTATV,NOEL,NPT,LAYER,KSPT,KSTEP,KINC,
+     1 NDI,NSHR,MATLAYO
+      INTEGER JMAC(*), JMATYP(*)
+      REAL*8 PNEWDT,CELENT,TIME(2),DTIME
+      REAL*8 FIELD(NFIELD),STATEV(NSTATV),COORD(3),
+     1 DIRECT(3,3),T(3,3)
+      CHARACTER*80 CMNAME, ORNAME
+
       RETURN
       END
